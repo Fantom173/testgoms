@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 )
 
@@ -71,7 +72,64 @@ func HomePage(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, html)
 }
 
-// CreateCar создает новый автомобиль
+// Общая функция для обновления объекта
+func updateEntity[T any](w http.ResponseWriter, r *http.Request, entities *[]T, getID func(T) int64, setID func(*T, int64)) {
+	var updatedEntity T
+	if err := json.NewDecoder(r.Body).Decode(&updatedEntity); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	id := getID(updatedEntity)
+
+	for i, entity := range *entities {
+		if getID(entity) == id {
+			(*entities)[i] = updatedEntity
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(updatedEntity)
+			return
+		}
+	}
+
+	http.Error(w, "Entity not found", http.StatusNotFound)
+}
+
+// Функция удаления сущности
+func deleteEntity[T any](w http.ResponseWriter, r *http.Request, entities *[]T, getID func(T) int64) {
+	idParam := r.URL.Query().Get("id")
+	id, err := strconv.ParseInt(idParam, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	for i, entity := range *entities {
+		if getID(entity) == id {
+			*entities = append((*entities)[:i], (*entities)[i+1:]...)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+
+	http.Error(w, "Entity not found", http.StatusNotFound)
+}
+
+// Удаление автомобиля
+func (s *Server) DeleteCar(w http.ResponseWriter, r *http.Request) {
+	deleteEntity(w, r, &s.cars, func(c Car) int64 { return c.ID })
+}
+
+// Удаление мебели
+func (s *Server) DeleteFurniture(w http.ResponseWriter, r *http.Request) {
+	deleteEntity(w, r, &s.furniture, func(f Furniture) int64 { return f.ID })
+}
+
+// Удаление цветов
+func (s *Server) DeleteFlower(w http.ResponseWriter, r *http.Request) {
+	deleteEntity(w, r, &s.flowers, func(f Flower) int64 { return f.ID })
+}
+
+// Методы для работы с автомобилями
 func (s *Server) CreateCar(w http.ResponseWriter, r *http.Request) {
 	var newCar Car
 	if err := json.NewDecoder(r.Body).Decode(&newCar); err != nil {
@@ -90,7 +148,6 @@ func (s *Server) CreateCar(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newCar)
 }
 
-// GetCars возвращает список автомобилей
 func (s *Server) GetCars(w http.ResponseWriter, r *http.Request) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -99,7 +156,11 @@ func (s *Server) GetCars(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.cars)
 }
 
-// CreateFurniture создает новый объект мебели
+func (s *Server) UpdateCar(w http.ResponseWriter, r *http.Request) {
+	updateEntity(w, r, &s.cars, func(c Car) int64 { return c.ID }, func(c *Car, id int64) { c.ID = id })
+}
+
+// Методы для работы с мебелью
 func (s *Server) CreateFurniture(w http.ResponseWriter, r *http.Request) {
 	var newFurniture Furniture
 	if err := json.NewDecoder(r.Body).Decode(&newFurniture); err != nil {
@@ -118,7 +179,6 @@ func (s *Server) CreateFurniture(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newFurniture)
 }
 
-// GetFurniture возвращает список мебели
 func (s *Server) GetFurniture(w http.ResponseWriter, r *http.Request) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -127,7 +187,11 @@ func (s *Server) GetFurniture(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.furniture)
 }
 
-// CreateFlower создает новую запись о цветах
+func (s *Server) UpdateFurniture(w http.ResponseWriter, r *http.Request) {
+	updateEntity(w, r, &s.furniture, func(f Furniture) int64 { return f.ID }, func(f *Furniture, id int64) { f.ID = id })
+}
+
+// Методы для работы с цветами
 func (s *Server) CreateFlower(w http.ResponseWriter, r *http.Request) {
 	var newFlower Flower
 	if err := json.NewDecoder(r.Body).Decode(&newFlower); err != nil {
@@ -146,13 +210,16 @@ func (s *Server) CreateFlower(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newFlower)
 }
 
-// GetFlowers возвращает список цветов
 func (s *Server) GetFlowers(w http.ResponseWriter, r *http.Request) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(s.flowers)
+}
+
+func (s *Server) UpdateFlower(w http.ResponseWriter, r *http.Request) {
+	updateEntity(w, r, &s.flowers, func(f Flower) int64 { return f.ID }, func(f *Flower, id int64) { f.ID = id })
 }
 
 func main() {
@@ -167,6 +234,10 @@ func main() {
 			server.CreateCar(w, r)
 		} else if r.Method == http.MethodGet {
 			server.GetCars(w, r)
+		} else if r.Method == http.MethodPut {
+			server.UpdateCar(w, r)
+		} else if r.Method == http.MethodDelete {
+			server.DeleteCar(w, r)
 		} else {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
@@ -178,6 +249,10 @@ func main() {
 			server.CreateFurniture(w, r)
 		} else if r.Method == http.MethodGet {
 			server.GetFurniture(w, r)
+		} else if r.Method == http.MethodPut {
+			server.UpdateFurniture(w, r)
+		} else if r.Method == http.MethodDelete {
+			server.DeleteFurniture(w, r)
 		} else {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
@@ -189,6 +264,10 @@ func main() {
 			server.CreateFlower(w, r)
 		} else if r.Method == http.MethodGet {
 			server.GetFlowers(w, r)
+		} else if r.Method == http.MethodPut {
+			server.UpdateFlower(w, r)
+		} else if r.Method == http.MethodDelete {
+			server.DeleteFlower(w, r)
 		} else {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
